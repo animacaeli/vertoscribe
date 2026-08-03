@@ -196,6 +196,8 @@ def run(args) -> str:
         output_dir=args.output,
         vision_descriptions=vision_descriptions,
         model=args.model,
+        provider=getattr(args, "provider", "deepseek"),
+        api_base=getattr(args, "api_base", None),
         temperature=args.temperature,
         max_tokens=args.max_tokens,
     )

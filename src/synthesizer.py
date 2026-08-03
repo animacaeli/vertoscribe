@@ -18,6 +18,43 @@ from src.blog_rules import get_blog_template
 # 项目根目录（vertoscribe/）
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+# 预定义 provider 的 base_url 和默认 key 环境变量
+_PROVIDERS = {
+    "deepseek": ("https://api.deepseek.com", "DEEPSEEK_API_KEY"),
+    "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY"),
+    "ollama": ("http://localhost:11434/v1", None),  # Ollama 本地无需 key
+    "qwen": ("https://dashscope.aliyuncs.com/compatible-mode/v1", "DASHSCOPE_API_KEY"),
+}
+
+
+def _resolve_client(provider: str, api_base: str | None) -> tuple[OpenAI, str]:
+    """根据 provider/--api-base 解析 API 客户端和实际 base_url。"""
+    if api_base:
+        base = api_base
+        key_env = "LLM_API_KEY"
+    elif provider in _PROVIDERS:
+        base, key_env = _PROVIDERS[provider]
+    else:
+        raise RuntimeError(
+            f"不支持的 provider: {provider}。支持: {', '.join(_PROVIDERS.keys())}"
+        )
+
+    api_key = None
+    if key_env:
+        api_key = os.getenv(key_env)
+
+    # Ollama 本地模式不需要 key
+    if provider == "ollama" and not api_key:
+        api_key = "ollama"  # 占位，Ollama 不校验
+
+    if not api_key:
+        raise RuntimeError(
+            f"环境变量 {key_env or 'LLM_API_KEY'} 未设置，无法调用 LLM API。"
+            f"请运行 'vertoscribe config' 或手动设置环境变量。"
+        )
+
+    return OpenAI(base_url=base, api_key=api_key), base
+
 
 def _load_prompt_template() -> string.Template:
     """从 prompts/blog_synthesis.md 加载 Prompt 模板。"""
@@ -42,16 +79,20 @@ def synthesize(
     *,
     vision_descriptions: str = "",
     model: str = "deepseek-chat",
+    provider: str = "deepseek",
+    api_base: str | None = None,
     temperature: float = 0.7,
     max_tokens: int = 8192,
 ) -> str:
-    """调用 DeepSeek API，将转录文本合成为技术博客 Markdown。
+    """调用 LLM API，将转录文本合成为技术博客 Markdown。
 
     Args:
         transcript: 完整的转录文本。
         output_dir: 输出目录（Phase 2 预留给文件写入逻辑，当前未使用）。
         vision_descriptions: 视频画面的文字描述（可选）。
-        model: DeepSeek 模型名称，默认 'deepseek-chat'。
+        model: 模型名称，默认 'deepseek-chat'。
+        provider: API 提供商（deepseek/openai/ollama/qwen），默认 deepseek。
+        api_base: 自定义 API base URL，优先级高于 provider。
         temperature: 生成温度，默认 0.7。
         max_tokens: 最大输出 token 数，默认 8192。
 
@@ -75,15 +116,11 @@ def synthesize(
         blog_structure_template=blog_structure,
     )
 
-    # 初始化 DeepSeek 客户端（兼容 OpenAI SDK）
-    api_key = os.getenv("DEEPSEEK_API_KEY")
-    if not api_key:
-        raise RuntimeError("环境变量 DEEPSEEK_API_KEY 未设置，无法调用 DeepSeek API")
+    # 根据 provider 解析 API 客户端
+    client, resolved_base = _resolve_client(provider, api_base)
 
-    client = OpenAI(
-        base_url="https://api.deepseek.com",
-        api_key=api_key,
-    )
+    if provider == "ollama":
+        print(f"  🤖 本地模型: {model} (via {resolved_base})")
 
     return _call_with_retry(
         client,

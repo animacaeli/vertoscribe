@@ -42,7 +42,19 @@ def build_parser() -> argparse.ArgumentParser:
         "-m", "--model",
         type=str,
         default="deepseek-chat",
-        help="DeepSeek 模型名，默认 deepseek-chat",
+        help="LLM 模型名，默认 deepseek-chat",
+    )
+    parser.add_argument(
+        "--provider",
+        type=str,
+        default="deepseek",
+        help="LLM 提供商: deepseek(默认) / openai / ollama / qwen",
+    )
+    parser.add_argument(
+        "--api-base",
+        type=str,
+        default=None,
+        help="自定义 LLM API base URL（优先级高于 --provider）",
     )
     parser.add_argument(
         "-t", "--temperature",

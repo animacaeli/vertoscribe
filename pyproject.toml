@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "vertoscribe"
 version = "0.1.0"
-description = "一条命令，教学视频变高质量技术博客。"
+description = "一条命令，教学视频变高质量技术博客。vertere（转化）+ scribere（书写）= 将视频转化为文字。"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [{name = "GuoHao"}]
-keywords = ["video", "blog", "whisper", "deepseek", "cli", "transcription"]
+keywords = ["video", "blog", "whisper", "deepseek", "openai", "ollama", "cli", "transcription", "bilibili", "douyin"]
 urls = { repository = "https://github.com/animacaeli/vertoscribe" }
 classifiers = [
     "Development Status :: 3 - Alpha",
