@@ -2,9 +2,8 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import re
-from pathlib import Path
+import subprocess
 
 
 class VideoDownloadError(Exception):
@@ -38,7 +37,7 @@ def get_video_title(url: str) -> str:
         url,
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
 
     if result.returncode != 0:
         stderr = result.stderr.strip()
@@ -83,7 +82,7 @@ def download_video(url: str, output_dir: str) -> str:
         url,
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=False)
 
     if result.returncode != 0:
         stderr = result.stderr.strip()

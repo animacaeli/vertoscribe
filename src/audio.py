@@ -1,8 +1,8 @@
 """ffmpeg 封装，提供视频音频提取、时长获取、文件校验功能。"""
 from __future__ import annotations
 
-import subprocess
 import os
+import subprocess
 
 
 def extract_audio(video_path: str, output_path: str) -> str:
@@ -33,7 +33,7 @@ def extract_audio(video_path: str, output_path: str) -> str:
         "-y",                 # 覆盖已存在文件
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
 
     if result.returncode != 0:
         raise RuntimeError(f"音频提取失败: {result.stderr.strip()}")
@@ -68,7 +68,7 @@ def get_video_duration(video_path: str) -> float:
         video_path,
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, check=False)
 
     if result.returncode != 0:
         raise RuntimeError(f"获取视频时长失败: {result.stderr.strip()}")
@@ -104,7 +104,7 @@ def validate_video(video_path: str) -> bool:
         video_path,
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, check=False)
 
     if result.returncode != 0:
         return False

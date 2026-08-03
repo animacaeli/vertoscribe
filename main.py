@@ -42,7 +42,7 @@ def run(args) -> str:
     """
     # 延迟导入 src 子模块，避免未安装依赖时模块级 import 失败
     from src.audio import extract_audio, validate_video
-    from src.downloader import download_video, get_video_title
+    from src.downloader import VideoDownloadError, download_video, get_video_title
     from src.postprocess import check_blog, save_blog
     from src.synthesizer import synthesize
     from src.transcriber import transcribe
@@ -77,7 +77,8 @@ def run(args) -> str:
         # 获取视频标题用于输出文件名
         try:
             video_title = get_video_title(args.url)
-        except Exception:
+        except (VideoDownloadError, ValueError):
+            # get_video_title 可能因网络/平台问题失败，降级为标题 fallback
             video_title = "untitled"
     else:
         print(f"[{step}/{total_steps}] 使用本地视频文件...")
@@ -118,10 +119,9 @@ def run(args) -> str:
     # ====== 步骤 5：博客合成 ======
     step += 1
     print(f"[{step}/{total_steps}] 博客合成（DeepSeek）...")
-    if args.with_vision:
+    if args.with_vision and args.verbose:
         # Phase 2 实现视觉分析，当前跳过
-        if args.verbose:
-            print("  --with-vision 已开启，视觉分析将在 Phase 2 实现，当前跳过关键帧提取")
+        print("  --with-vision 已开启，视觉分析将在 Phase 2 实现，当前跳过关键帧提取")
     blog_content = synthesize(
         transcript=full_text,
         output_dir=args.output,
@@ -199,7 +199,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n⚠️  用户中断", file=sys.stderr)
         sys.exit(130)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"\n❌ 执行失败: {e}", file=sys.stderr)
         if args.verbose:
             import traceback

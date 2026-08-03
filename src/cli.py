@@ -151,7 +151,7 @@ def init_config():
         if whisper_model:
             f.write(f"WHISPER_MODEL={whisper_model}\n")
 
-    print(f"\n✅ 配置已保存。现在可以直接使用 vertoscribe 命令了。")
+    print("\n✅ 配置已保存。现在可以直接使用 vertoscribe 命令了。")
     # 加载刚创建的配置
     _try_load(config_path)
 

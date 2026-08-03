@@ -117,7 +117,7 @@ def _call_with_retry(
                 max_tokens=max_tokens,
                 timeout=120.0,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             last_error = exc
             if attempt < max_retries:
                 wait = 2 ** attempt  # 1s → 2s → 4s
