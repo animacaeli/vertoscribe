@@ -178,7 +178,12 @@ def run(args) -> str:
         if args.with_vision:
             # 步骤 5c：调用视觉模型分析画面
             print(f"[5c/{total_steps}] 画面分析（{args.vision_model}）...")
-            results = asyncio.run(analyze_all_frames(deduped, model=args.vision_model, concurrency=5))
+            results = asyncio.run(
+                analyze_all_frames(
+                    deduped, model=args.vision_model, concurrency=5,
+                    interval=args.frame_interval,
+                )
+            )
 
             # 步骤 5d：格式化画面描述
             print(f"[5d/{total_steps}] 格式化画面描述...")

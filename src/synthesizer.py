@@ -1,6 +1,7 @@
-"""DeepSeek API 博客合成封装。
+"""LLM API 博客合成封装。
 
-将转录文本和画面描述发送给 DeepSeek，结合写作规范生成技术博客 Markdown。
+将转录文本和画面描述发送给 LLM（支持 DeepSeek/OpenAI/Ollama/Qwen），
+结合写作规范生成技术博客 Markdown。
 """
 
 from __future__ import annotations
@@ -139,7 +140,7 @@ def _call_with_retry(
     max_tokens: int,
     max_retries: int = 3,
 ) -> str:
-    """调用 DeepSeek API，含重试逻辑（指数退避）。"""
+    """调用 LLM API，含重试逻辑（指数退避）。"""
     last_error: Exception | None = None
 
     for attempt in range(max_retries + 1):

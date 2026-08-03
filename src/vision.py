@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import os
 import re
 import subprocess
@@ -221,9 +223,6 @@ async def analyze_frame(
     prompt_text = _load_vision_prompt()
 
     # 读取图片并转为 data URL（JPEG base64）
-    import base64
-    import io
-
     img = Image.open(image_path)
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="JPEG", quality=85)
@@ -263,6 +262,7 @@ async def analyze_all_frames(
     frame_paths: list[str],
     model: str = "qwen-vl-plus",
     concurrency: int = 5,
+    interval: int = 10,
 ) -> list[dict]:
     """并发分析所有关键帧，Semaphore 限流。
 
@@ -294,10 +294,7 @@ async def analyze_all_frames(
 
     async def _analyze_one(frame_path: str) -> dict:
         """带限流的单帧分析任务。"""
-        # 从文件名提取时间戳，抽帧间隔固定为 10 秒（与 extract_keyframes 默认一致）
-        # 注意：此处 interval 用于时间戳计算，并非实际抽帧参数。
-        # 如果将来支持可变 interval，需从外部传入。
-        timestamp = _extract_timestamp(frame_path, interval=10)
+        timestamp = _extract_timestamp(frame_path, interval=interval)
 
         async with semaphore:
             print(f"  [vision] 分析中: {Path(frame_path).name} (t={timestamp:.0f}s)")
