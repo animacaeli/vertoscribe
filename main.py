@@ -112,12 +112,31 @@ def run(args) -> str:
 
     # ====== 步骤 4：语音转录 ======
     step += 1
-    print(f"[{step}/{total_steps}] 语音转录（faster-whisper）...")
-    model_name = os.getenv("WHISPER_MODEL", None)
-    segments, full_text = transcribe(audio_path, model_name=model_name)
-    if args.verbose:
-        print(f"  转录段落数: {len(segments)}")
-        print(f"  文本长度: {len(full_text)} 字符")
+
+    from src.cache import load_transcript, save_transcript
+
+    # 尝试从缓存加载
+    segments, full_text = None, ""
+    if not getattr(args, "no_cache", False):
+        cached = load_transcript(video_path)
+        if cached:
+            segments, full_text = cached
+            print(f"[{step}/{total_steps}] 语音转录（缓存命中 ✅，跳过）...")
+            if args.verbose:
+                print(f"  转录段落数: {len(segments)}")
+                print(f"  文本长度: {len(full_text)} 字符")
+
+    if not segments:
+        print(f"[{step}/{total_steps}] 语音转录（faster-whisper）...")
+        model_name = os.getenv("WHISPER_MODEL", None)
+        segments, full_text = transcribe(audio_path, model_name=model_name)
+        if args.verbose:
+            print(f"  转录段落数: {len(segments)}")
+            print(f"  文本长度: {len(full_text)} 字符")
+        # 写入缓存
+        save_transcript(video_path, segments, full_text)
+        if args.verbose:
+            print("  已缓存: ~/.cache/vertoscribe/")
 
     # ====== 画面分析（Phase 2：--with-vision 时启用） ======
     vision_descriptions = ""
@@ -207,6 +226,24 @@ def run(args) -> str:
 
     blog_path = save_blog(blog_content, output_path)
     print(f"  ✅ 博客已保存: {blog_path}")
+
+    # ====== 保存准确率评估报告 ======
+    report = {
+        "output_file": blog_path,
+        "video_title": video_title,
+        "model": args.model,
+        "quality_score": result["score"],
+        "warnings": result["warnings"],
+        "transcript_chars": len(full_text),
+        "blog_chars": len(blog_content),
+        "vision_enabled": args.with_vision,
+    }
+    report_path = output_path.replace(".md", "_report.json")
+    import json as _json
+    with open(report_path, "w", encoding="utf-8") as _f:
+        _json.dump(report, _f, ensure_ascii=False, indent=2)
+    if args.verbose:
+        print(f"  📊 评估报告: {report_path}")
 
     # ====== 准确率对比（vision 模式时输出） ======
     if vision_was_run:

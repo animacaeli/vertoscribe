@@ -74,6 +74,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="关键帧提取间隔（秒），默认 10，仅 --with-vision 时生效",
     )
     parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="跳过转录缓存，强制重新转录",
+    )
+    parser.add_argument(
         "--keep-temp",
         action="store_true",
         help="保留中间文件（调试用）",
