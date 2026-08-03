@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.env
+output/
+*.wav
+*.mp4
+frames/
+.cache/
+test_output/
+vertoscribe.egg-info/
+*.egg-info/
+.DS_Store
