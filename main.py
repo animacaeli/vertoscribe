@@ -1,16 +1,18 @@
 """vertoscribe 主流程入口。
 
-串联视频下载 → 音频提取 → 语音转录 → 博客合成 → 后处理检查 → 保存的完整流程。
+串联视频下载 → 音频提取 → 语音转录 → [画面分析] → 博客合成 → 后处理检查 → 保存的完整流程。
 
 用法:
     python main.py -u "https://www.bilibili.com/video/xxx" -o ./output/
     python main.py -f ./video.mp4 -o ./output/
+    python main.py -f ./video.mp4 -o ./output/ --with-vision
 
 也可通过 pip 安装后使用 console_scripts 入口: vertoscribe
 """
 
 from __future__ import annotations
 
+import asyncio
 import atexit
 import os
 import re
@@ -30,9 +32,10 @@ def run(args) -> str:
         2. validate_video() 校验视频格式
         3. extract_audio() 提取音频
         4. transcribe() 语音转录为文本
-        5. synthesize() 调用 LLM 合成博客
-        6. check_blog() 后处理规范检查
-        7. save_blog() 保存到输出目录
+        5. [可选] vision 画面分析（提取关键帧 → 去重 → API 分析 → 格式化）
+        6. synthesize() 调用 LLM 合成博客
+        7. check_blog() 后处理规范检查
+        8. save_blog() 保存到输出目录
 
     Args:
         args: argparse.Namespace，由 build_parser().parse_args() 产生。
@@ -63,8 +66,8 @@ def run(args) -> str:
     if args.verbose:
         print(f"[临时目录] {work_dir}")
 
-    # 总步骤数（vision 暂未实现，不计入）
-    total_steps = 7
+    # 动态计算总步骤数（vision 模式比纯音频多 2 步）
+    total_steps = 9 if args.with_vision else 7
     step = 0
 
     # ====== 步骤 1：输入准备 ======
@@ -116,15 +119,63 @@ def run(args) -> str:
         print(f"  转录段落数: {len(segments)}")
         print(f"  文本长度: {len(full_text)} 字符")
 
-    # ====== 步骤 5：博客合成 ======
-    step += 1
+    # ====== 画面分析（Phase 2：--with-vision 时启用） ======
+    vision_descriptions = ""
+    vision_was_run = False
+
+    if args.with_vision:
+        # 延迟导入 vision 模块
+        from src.vision import (
+            analyze_all_frames,
+            deduplicate_frames,
+            extract_keyframes,
+            format_vision_descriptions,
+        )
+
+        # 步骤 5a：提取关键帧
+        print(f"[5a/{total_steps}] 提取关键帧（间隔 {args.frame_interval}s）...")
+        frame_paths = extract_keyframes(video_path, work_dir, interval=args.frame_interval)
+        if args.verbose:
+            print(f"  提取到 {len(frame_paths)} 帧")
+
+        # 步骤 5b：去重关键帧
+        print(f"[5b/{total_steps}] 去重关键帧...")
+        deduped = deduplicate_frames(frame_paths, threshold=5)
+        print(f"  原始 {len(frame_paths)} 帧 → 去重后 {len(deduped)} 帧")
+
+        # 长视频费用预估（去重后 > 100 帧时）
+        if len(deduped) > 100:
+            cost_plus = len(deduped) * 0.004
+            cost_max = len(deduped) * 0.02
+            print(f"\n⚠️ 画面分析需处理 {len(deduped)} 帧，预估费用:")
+            print(f"  · qwen-vl-plus（当前）: ¥{cost_plus:.2f}")
+            if args.vision_model == "qwen-vl-max":
+                print(f"  · qwen-vl-max: ¥{cost_max:.2f}")
+            answer = input("是否继续？[y/N] ")
+            if answer.lower() not in ("y", "yes"):
+                print("已取消画面分析，降级为纯音频模式")
+                args.with_vision = False
+
+        if args.with_vision:
+            # 步骤 5c：调用视觉模型分析画面
+            print(f"[5c/{total_steps}] 画面分析（{args.vision_model}）...")
+            results = asyncio.run(analyze_all_frames(deduped, model=args.vision_model, concurrency=5))
+
+            # 步骤 5d：格式化画面描述
+            print(f"[5d/{total_steps}] 格式化画面描述...")
+            vision_descriptions = format_vision_descriptions(results)
+            vision_was_run = True
+
+        step = 6  # 后续主步骤从 6 开始（vision 模式）
+    else:
+        step += 1  # 纯音频模式：下一步是步骤 5
+
+    # ====== 步骤 合成（纯音频模式为步骤 5，vision 模式为步骤 6） ======
     print(f"[{step}/{total_steps}] 博客合成（DeepSeek）...")
-    if args.with_vision and args.verbose:
-        # Phase 2 实现视觉分析，当前跳过
-        print("  --with-vision 已开启，视觉分析将在 Phase 2 实现，当前跳过关键帧提取")
     blog_content = synthesize(
         transcript=full_text,
         output_dir=args.output,
+        vision_descriptions=vision_descriptions,
         model=args.model,
         temperature=args.temperature,
         max_tokens=args.max_tokens,
@@ -132,7 +183,7 @@ def run(args) -> str:
     if args.verbose:
         print(f"  博客长度: {len(blog_content)} 字符")
 
-    # ====== 步骤 6：后处理检查 ======
+    # ====== 步骤 后处理检查（纯音频模式为步骤 6，vision 模式为步骤 7） ======
     step += 1
     print(f"[{step}/{total_steps}] 后处理检查...")
     result = check_blog(blog_content)
@@ -143,7 +194,7 @@ def run(args) -> str:
     if result["score"] < 6:
         print("  ⚠️  博客评分较低，建议人工审查后发布", file=sys.stderr)
 
-    # ====== 步骤 7：保存博客 ======
+    # ====== 步骤 保存博客（纯音频模式为步骤 7，vision 模式为步骤 8） ======
     step += 1
     print(f"[{step}/{total_steps}] 保存博客...")
 
@@ -156,6 +207,20 @@ def run(args) -> str:
 
     blog_path = save_blog(blog_content, output_path)
     print(f"  ✅ 博客已保存: {blog_path}")
+
+    # ====== 准确率对比（vision 模式时输出） ======
+    if vision_was_run:
+        print()
+        print("🎯 纯音频准确率预估: ~7-8/10")
+        match = re.search(
+            r"(?:accuracy_score|准确度[评分]).*?[:：]\s*(\d+(?:\.\d+)?)",
+            blog_content,
+            re.IGNORECASE,
+        )
+        if match:
+            print(f"🖼️ 含画面分析准确率: {match.group(1)}/10")
+        else:
+            print("🖼️ 含画面分析准确率: 未从博客中提取到 accuracy_score")
 
     # ====== 清理临时文件（主动清理 + 取消 atexit 注册避免重复） ======
     if not args.keep_temp:
