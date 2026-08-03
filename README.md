@@ -32,12 +32,13 @@ vertoscribe -f ./tutorial.mp4 -o ./output/ --with-vision
 
 - 🎥 支持 B站、抖音视频链接，也可使用本地 mp4 文件
 - 🎙️ faster-whisper 本地语音转录，数据不出本机，隐私安全
-- 🤖 DeepSeek API 智能合成结构化技术博客
+- 🤖 多 LLM 后端支持：DeepSeek / OpenAI / Ollama / Qwen
 - 🖼️ 可选画面关键帧分析（Qwen-VL），图片内容入文
 - ✅ 写作规范自动检查（TL;DR / 代码块语言标注 / 禁用词 / YAML frontmatter）
 - 📝 内置 5 种技术博客类型模板（教程 / 深度解析 / 架构设计 / 基准对比 / 工具评测）
-- 💰 成本透明：纯音频约 0.01 元/篇，含画面约 0.16 元/篇
-- 🧹 临时文件自动清理，支持 `--keep-temp` 调试模式
+- 💾 转录缓存：SHA256 哈希，避免重复转录
+- 💰 成本透明：纯音频约 ¥0.01/篇，含画面约 ¥0.16/篇
+- 🧹 临时文件自动清理，支持 `--keep-temp` 调试模式接口
 
 ## 安装
 
@@ -83,12 +84,15 @@ pip install -e ".[dev]"
 | `-u, --url` | string | — | 视频在线链接（仅支持抖音/B站），必须用引号包裹 |
 | `-f, --file` | string | — | 本地 mp4 文件路径 |
 | `-o, --output` | string | `./output/` | 博客输出目录 |
-| `-m, --model` | string | `deepseek-chat` | DeepSeek 模型名 |
+| `-m, --model` | string | `deepseek-chat` | LLM 模型名 |
+| `--provider` | string | `deepseek` | LLM 提供商：deepseek/openai/ollama/qwen |
+| `--api-base` | string | — | 自定义 LLM API 端点（优先级高于 --provider） |
 | `-t, --temperature` | float | `0.7` | LLM 生成温度（0-2） |
-| `--max-tokens` | int | `8192` | DeepSeek 输出最大 token 数 |
+| `--max-tokens` | int | `8192` | LLM 输出最大 token 数 |
 | `--with-vision` | flag | false | 开启画面关键帧分析（需 DashScope API） |
 | `--vision-model` | string | `qwen-vl-plus` | 视觉模型，可升级 `qwen-vl-max` |
 | `--frame-interval` | int | `10` | 关键帧提取间隔（秒），仅 `--with-vision` 时生效 |
+| `--no-cache` | flag | false | 跳过转录缓存，强制重新转录 |
 | `--keep-temp` | flag | false | 保留中间文件（调试用） |
 | `-v, --verbose` | flag | false | 打印详细日志 |
 
@@ -201,28 +205,38 @@ tags: [python, crawler, tutorial]
 
 ## 路线图
 
-### Phase 1（当前版本 v0.1.0）
+### ✅ Phase 1：核心流水线（v0.1.0）
 - [x] B站/抖音视频下载（yt-dlp）
-- [x] 音频提取（ffmpeg PCM 16kHz）
-- [x] faster-whisper 本地转写
-- [x] DeepSeek API 博客合成
-- [x] 写作规范后处理检查
-- [x] 内置 5 种博客类型模板
-- [x] 临时文件自动清理
+- [x] 音频提取（ffmpeg PCM 16kHz）+ ffprobe 校验
+- [x] faster-whisper 本地转写（三平台自适应 compute_type）
+- [x] DeepSeek API 博客合成（string.Template 注入 + API 重试）
+- [x] 写作规范后处理检查（TL;DR / 禁用词 / 代码块标注 / frontmatter）
+- [x] 内置 5 种技术博客类型模板
+- [x] 临时文件自动清理（atexit 兜底）
+- [x] CLI 交互式配置（`vertoscribe config`）+ 多级 .env 加载
 
-### Phase 2
-- [ ] 画面关键帧提取与 Qwen-VL 分析
-- [ ] 图片自动插入博客对应段落
-- [ ] 视频时长超限告警与分段处理
+### ✅ Phase 2：画面分析（v0.2.0）
+- [x] 关键帧提取（ffmpeg fps）+ dHash 去重（Hamming < 5）
+- [x] Qwen-VL-Plus/Max 并发分析（asyncio Semaphore 5）
+- [x] 画面描述与音频文本时间戳对齐
+- [x] 长视频费用预估 + 用户确认交互
+- [x] 准确率对比报告（纯音频 vs 含画面）
 
-### Phase 3
-- [ ] 多语言支持（英文 / 日文转录 + 对应博客输出）
+### ✅ Phase 3：体验优化（v0.2.0）
+- [x] 转录文本缓存（SHA256 哈希，~/.cache/vertoscribe/，`--no-cache` 跳过）
+- [x] `--verbose` 详细日志
+- [x] `--keep-temp` 保留中间文件
+- [x] 准确率评估 JSON 报告（`*_report.json`）
+
+### ✅ Phase 4：多模型扩展（v0.2.0）
+- [x] LLM 后端：DeepSeek / OpenAI / Ollama / Qwen（`--provider` + `--api-base`）
+- [x] Ollama 本地零成本模式（无需 API Key）
+
+### 🔜 后续计划
+- [ ] 多语言转录支持
 - [ ] 自定义 Prompt 模板（`--prompt-file`）
-- [ ] 增量处理（跳过已下载/已转录的缓存）
-
-### Phase 4
+- [ ] pip 包发布到 PyPI
 - [ ] Web UI 界面
-- [ ] 批量处理队列
 - [ ] Docker 一键部署
 
 ## 贡献
