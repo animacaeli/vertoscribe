@@ -13,3 +13,5 @@ test_output/
 vertoscribe.egg-info/
 *.egg-info/
 .DS_Store
+.idea
+.idea/
