@@ -145,8 +145,10 @@ def check_blog(blog_content: str) -> dict:
             score -= 1
 
     # 8. 阅读节奏：正文段落过长（掘金移动端长段落跳出率高）
+    #    先整体剔除代码块（含空行的代码会被按空行切开，碎片误判为长段落）
+    prose = re.sub(r"```.*?```", "", blog_content, flags=re.DOTALL)
     long_paras = [
-        p for p in re.split(r"\n\s*\n", blog_content)
+        p for p in re.split(r"\n\s*\n", prose)
         if not p.lstrip().startswith(("#", "|", ">", "```", "-", "!"))
         and not p.startswith("---")
         and len(re.sub(r"\s", "", p)) > 300
