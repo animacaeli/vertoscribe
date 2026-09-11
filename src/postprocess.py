@@ -43,17 +43,21 @@ def check_blog(blog_content: str) -> dict:
     score = 10
 
     # 1. 检查摘要段落（形式不限：TL;DR / 太长不看版 / 一句话结论 / 结论先行 / 速览）
-    #    摘要以 --- 分隔线或下一个 ## 小节为界（分隔线后是开场叙事，不属于摘要）
+    #    摘要 = 标题后的第一个段落；同小节内的后续段落视为开场叙事，不计入
     summary_match = re.search(
         r"##\s*(?:TL;DR|太长不看|一句话结论|结论先行|速览|摘要)[^\n]*\n(.*?)(?=\n## |\n---\s*\n|\Z)",
         blog_content,
         re.DOTALL | re.IGNORECASE,
     )
-    if not summary_match:
+    if summary_match:
+        summary_first_para = summary_match.group(1).split("\n\n")[0]
+    else:
+        summary_first_para = None
+    if summary_first_para is None:
         warnings.append("缺少摘要段落（TL;DR / 太长不看版 / 一句话结论等形式均可）")
         score -= 1
     else:
-        summary_len = len(re.sub(r"\s", "", summary_match.group(1)))
+        summary_len = len(re.sub(r"\s", "", summary_first_para))
         if summary_len > 100:
             warnings.append(f"摘要过长：{summary_len} 字（要求 ≤ 100 字）")
             score -= 1
@@ -179,7 +183,10 @@ def extract_publish_info(blog_content: str) -> dict:
         blog_content,
         re.DOTALL | re.IGNORECASE,
     )
-    summary = re.sub(r"\s", "", summary_m.group(1))[:100] if summary_m else ""
+    # 与 check_blog 口径一致：只取摘要小节的第一个段落
+    summary = (
+        re.sub(r"\s", "", summary_m.group(1).split("\n\n")[0])[:100] if summary_m else ""
+    )
 
     return {
         "title": (title_m.group(1) if title_m else "")[:40],
