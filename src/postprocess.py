@@ -140,6 +140,9 @@ def check_blog(blog_content: str) -> dict:
             # 边标签必须用管道语法（A -->|"文字"| B），-- 文字 --> 兼容性差
             if re.search(r"--[^->\n][^-]*-->", block):
                 compat_issues.append("边标签应使用 -->|\"文字\"| 管道语法")
+            # 掘金不做 HTML 实体解码（粘贴时引号可能被转义成 &#34; 等）
+            if re.search(r"&#?\w+;", block):
+                compat_issues.append("含 HTML 实体（如 &#34;），应使用裸引号")
         if compat_issues:
             warnings.append("mermaid 含掘金不兼容语法: " + "；".join(set(compat_issues)))
             score -= 1
