@@ -27,19 +27,22 @@ def normalize_blog(blog_content: str) -> str:
 
 
 def fix_mermaid_quotes(blog_content: str) -> str:
-    """去掉 mermaid 标签中可安全去除的引号。
+    """掘金发布安全的 mermaid 清洗：去除可安全去除的引号 + 消除 <br/>。
 
-    根因：掘金发布管线会把代码块内的引号转义为 HTML 实体（&#34;），
-    线上渲染器不解码，导致发布后图表挂掉（编辑态预览正常）。
-    无引号标签（A[标签] / -->|标签|）是合法语法且无引号可被转义。
+    根因：掘金发布管线会把代码块内的 HTML 特殊字符转义（`"` → `&#34;`、
+    `<br/>` → `&lt;br/&gt;`），线上渲染器不解码，导致发布后图表挂掉
+    （编辑态预览正常）。因此标签必须：无引号、无换行标记，一律单行。
 
-    仅当标签不含引号敏感字符（[]{}|"#）时去除，其余保留引号。
+    仅当标签不含引号敏感字符（[]{}|"#）时去引号，其余保留引号；
+    `<br/>` 统一替换为空格（标签变单行）。
     """
     # 标签内容字符集：不含 [ ] { } | " # 才能安全去引号
     safe = r'([^"\[\]\{\}\|#]+)'
 
     def _fix_block(match: re.Match) -> str:
         block = match.group(1)
+        # 掘金发布会把 < > 转义，<br/> 换行标记必须消除
+        block = re.sub(r"<br\s*/?>", " ", block)
         block = re.sub(r'\["' + safe + r'"\]', r"[\1]", block)
         block = re.sub(r'\{"' + safe + r'"\}', r"{\1}", block)
         block = re.sub(r'\|"' + safe + r'"\|', r"|\1|", block)
@@ -162,9 +165,12 @@ def check_blog(blog_content: str) -> dict:
             # 边标签必须用管道语法（A -->|"文字"| B），-- 文字 --> 兼容性差
             if re.search(r"--[^->\n][^-]*-->", block):
                 compat_issues.append("边标签应使用 -->|\"文字\"| 管道语法")
-            # 掘金不做 HTML 实体解码（粘贴时引号可能被转义成 &#34; 等）
+            # 掘金发布会把 < > 转义，<br/> 等换行标记会变成 &lt;br/&gt; 导致挂掉
+            if re.search(r"<br\b|<\s*/?\s*[a-z]+", block, re.IGNORECASE):
+                compat_issues.append("标签含 HTML 标签（如 <br/>），应改为单行标签")
+            # HTML 实体（源码层面引入或上游转义残留）
             if re.search(r"&#?\w+;", block):
-                compat_issues.append("含 HTML 实体（如 &#34;），应使用裸引号")
+                compat_issues.append("含 HTML 实体（如 &#34;），应使用无引号单行标签")
         if compat_issues:
             warnings.append("mermaid 含掘金不兼容语法: " + "；".join(set(compat_issues)))
             score -= 1
