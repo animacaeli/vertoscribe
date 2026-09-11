@@ -1,9 +1,14 @@
-"""yt-dlp 封装，仅支持 B站 + 抖音视频下载。"""
+"""视频下载封装：B站走 yt-dlp，抖音走 Web API 解析（yt-dlp 已失效）。"""
 from __future__ import annotations
 
 import os
 import re
 import subprocess
+
+
+def _is_douyin(url: str) -> bool:
+    """轻量判断（避免顶层引入 gmssl 依赖链，B站-only 环境不受影响）。"""
+    return "douyin.com" in url.lower()
 
 
 class VideoDownloadError(Exception):
@@ -28,6 +33,13 @@ def get_video_title(url: str) -> str:
     """
     _validate_url(url)
 
+    if _is_douyin(url):
+        from .douyin import DouyinDownloadError, get_title
+        try:
+            return get_title(url)
+        except DouyinDownloadError as exc:
+            raise VideoDownloadError(str(exc)) from exc
+
     cookie_env = _build_cookie_args()
     cmd = [
         "yt-dlp",
@@ -40,12 +52,7 @@ def get_video_title(url: str) -> str:
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
 
     if result.returncode != 0:
-        stderr = result.stderr.strip()
-        if "douyin" in url.lower() or "douyin" in stderr.lower():
-            raise VideoDownloadError(
-                "抖音视频下载失败。请通过手机端下载视频后，使用 -f 本地文件模式处理。"
-            )
-        raise VideoDownloadError(f"获取视频标题失败: {stderr}")
+        raise VideoDownloadError(f"获取视频标题失败: {result.stderr.strip()}")
 
     title = result.stdout.strip()
     if not title:
@@ -70,6 +77,13 @@ def download_video(url: str, output_dir: str) -> str:
     """
     _validate_url(url)
 
+    if _is_douyin(url):
+        from .douyin import DouyinDownloadError, download_video as douyin_download
+        try:
+            return douyin_download(url, output_dir)
+        except DouyinDownloadError as exc:
+            raise VideoDownloadError(str(exc)) from exc
+
     out_path = os.path.join(output_dir, "video.mp4")
     cookie_env = _build_cookie_args()
     cmd = [
@@ -85,13 +99,7 @@ def download_video(url: str, output_dir: str) -> str:
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=False)
 
     if result.returncode != 0:
-        stderr = result.stderr.strip()
-        if "douyin" in url.lower() or "douyin" in stderr.lower():
-            raise VideoDownloadError(
-                "抖音视频下载失败。抖音平台限制较多，请通过手机端下载视频后，"
-                "使用 -f 指定本地 mp4 文件路径处理。"
-            )
-        raise VideoDownloadError(f"视频下载失败: {stderr}")
+        raise VideoDownloadError(f"视频下载失败: {result.stderr.strip()}")
 
     # 校验输出文件是否存在
     if not os.path.isfile(out_path) or os.path.getsize(out_path) == 0:
@@ -108,6 +116,8 @@ _SUPPORTED_DOMAINS = {
     "bilibili.com",
     "www.bilibili.com",
     "v.douyin.com",
+    "www.douyin.com",
+    "www.iesdouyin.com",
 }
 
 
