@@ -78,7 +78,8 @@ def download_video(url: str, output_dir: str) -> str:
     _validate_url(url)
 
     if _is_douyin(url):
-        from .douyin import DouyinDownloadError, download_video as douyin_download
+        from .douyin import DouyinDownloadError
+        from .douyin import download_video as douyin_download
         try:
             return douyin_download(url, output_dir)
         except DouyinDownloadError as exc:

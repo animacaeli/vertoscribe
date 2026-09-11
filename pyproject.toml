@@ -48,3 +48,9 @@ include = ["src*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff.lint.per-file-ignores]
+# _abogus.py 为引入的第三方签名算法（TikTokDownloader, GPL v3），保持原样不改动
+"src/_abogus.py" = ["RUF012", "RUF013"]
+# test_smoke.py 的导入冒烟测试故意只导入不断言
+"tests/*" = ["F401"]

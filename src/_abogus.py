@@ -11,8 +11,9 @@
 from random import choice, randint, random
 from re import compile as re_compile
 from time import time
-from urllib.parse import urlencode, quote
-from gmssl import sm3, func
+from urllib.parse import quote, urlencode
+
+from gmssl import func, sm3
 
 __all__ = ["ABogus"]
 
@@ -243,7 +244,6 @@ class ABogus:
 
 if __name__ == "__main__":
     # 测试
-    import json
 
     bogus = ABogus()
     test_params = {

@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import os
 import re
+from urllib.parse import quote, urlencode
 
 import requests
-from urllib.parse import quote, urlencode
 
 from ._abogus import ABogus
 

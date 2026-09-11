@@ -46,7 +46,12 @@ def run(args) -> str:
     # 延迟导入 src 子模块，避免未安装依赖时模块级 import 失败
     from src.audio import extract_audio, validate_video
     from src.downloader import VideoDownloadError, download_video, get_video_title
-    from src.postprocess import check_blog, extract_publish_info, normalize_blog, save_blog
+    from src.postprocess import (
+        check_blog,
+        extract_publish_info,
+        normalize_blog,
+        save_blog,
+    )
     from src.synthesizer import rewrite_blog, synthesize
     from src.transcriber import transcribe
 
