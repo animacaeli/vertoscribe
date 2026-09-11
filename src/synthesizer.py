@@ -123,13 +123,48 @@ def synthesize(
     if provider == "ollama":
         print(f"  🤖 本地模型: {model} (via {resolved_base})")
 
-    return _call_with_retry(
+    content = _call_with_retry(
         client,
         model=model,
         system_content=filled_prompt,
         temperature=temperature,
         max_tokens=max_tokens,
     )
+    _print_accuracy_score(content)
+    return content
+
+
+def rewrite_blog(
+    draft: str,
+    *,
+    model: str = "deepseek-chat",
+    provider: str = "deepseek",
+    api_base: str | None = None,
+    temperature: float = 0.7,
+    max_tokens: int = 8192,
+) -> str:
+    """调用 LLM 对初稿做"去 AI 味"重写（prompts/blog_rewrite.md）。
+
+    技术事实、代码、图表保留，只重写表达。失败时抛 RuntimeError。
+    """
+    prompt_path = _PROJECT_ROOT / "prompts" / "blog_rewrite.md"
+    with open(prompt_path, "r", encoding="utf-8") as f:
+        template = string.Template(f.read())
+
+    filled = template.safe_substitute(draft=_escape_dollar(draft))
+    client, _ = _resolve_client(provider, api_base)
+
+    print("  ✍️  文风重写 pass...")
+    content = _call_with_retry(
+        client,
+        model=model,
+        system_content=filled,
+        user_content="请按重写原则输出重写后的完整博客。",
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    _print_accuracy_score(content, label="重写稿")
+    return content
 
 
 def _call_with_retry(
@@ -138,6 +173,7 @@ def _call_with_retry(
     system_content: str,
     temperature: float,
     max_tokens: int,
+    user_content: str = "请根据以上转录文本和写作要求，生成一篇技术博客。",
     max_retries: int = 3,
 ) -> str:
     """调用 LLM API，含重试逻辑（指数退避）。"""
@@ -149,7 +185,7 @@ def _call_with_retry(
                 model=model,
                 messages=[
                     {"role": "system", "content": system_content},
-                    {"role": "user", "content": "请根据以上转录文本和写作要求，生成一篇技术博客。"},
+                    {"role": "user", "content": user_content},
                 ],
                 temperature=temperature,
                 max_tokens=max_tokens,
@@ -167,17 +203,12 @@ def _call_with_retry(
         if not response.choices:
             raise RuntimeError("DeepSeek API 返回了空的 choices 列表")
 
-        content = response.choices[0].message.content or ""
-
-        # 尝试从返回内容中提取 accuracy_score 并打印
-        _print_accuracy_score(content)
-
-        return content
+        return response.choices[0].message.content or ""
 
     raise RuntimeError(f"DeepSeek API 调用失败（已重试 {max_retries} 次）: {last_error}") from last_error
 
 
-def _print_accuracy_score(content: str) -> None:
+def _print_accuracy_score(content: str, label: str = "初稿") -> None:
     """从博客内容中提取并打印 accuracy_score。"""
     match = re.search(
         r"(?:accuracy_score|准确度[评分]).*?[:：]\s*(\d+(?:\.\d+)?)",
@@ -185,6 +216,6 @@ def _print_accuracy_score(content: str) -> None:
         re.IGNORECASE,
     )
     if match:
-        print(f"[synthesizer] accuracy_score = {match.group(1)}")
+        print(f"[synthesizer] {label} accuracy_score = {match.group(1)}")
     else:
-        print("[synthesizer] 未从返回内容中提取到 accuracy_score")
+        print(f"[synthesizer] 未从{label}中提取到 accuracy_score")

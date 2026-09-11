@@ -30,9 +30,11 @@ class TestImports:
         assert callable(check_blog)
 
     def test_blog_rules_import(self):
-        from src.blog_rules import get_blog_template, WRITING_RULES, FORBIDDEN_PATTERNS
+        from src.blog_rules import BLOG_TEMPLATES, FORBIDDEN_PATTERNS, get_blog_template
         template = get_blog_template()
         assert "TL;DR" in template
+        assert len(BLOG_TEMPLATES) >= 8
+        assert any("Needless" in p for p in FORBIDDEN_PATTERNS)
 
 
 class TestCheckBlog:
