@@ -26,6 +26,28 @@ def normalize_blog(blog_content: str) -> str:
     return (frontmatter + "\n\n" + text[match.end():].lstrip("\n")).rstrip() + "\n"
 
 
+def fix_mermaid_quotes(blog_content: str) -> str:
+    """去掉 mermaid 标签中可安全去除的引号。
+
+    根因：掘金发布管线会把代码块内的引号转义为 HTML 实体（&#34;），
+    线上渲染器不解码，导致发布后图表挂掉（编辑态预览正常）。
+    无引号标签（A[标签] / -->|标签|）是合法语法且无引号可被转义。
+
+    仅当标签不含引号敏感字符（[]{}|"#）时去除，其余保留引号。
+    """
+    # 标签内容字符集：不含 [ ] { } | " # 才能安全去引号
+    safe = r'([^"\[\]\{\}\|#]+)'
+
+    def _fix_block(match: re.Match) -> str:
+        block = match.group(1)
+        block = re.sub(r'\["' + safe + r'"\]', r"[\1]", block)
+        block = re.sub(r'\{"' + safe + r'"\}', r"{\1}", block)
+        block = re.sub(r'\|"' + safe + r'"\|', r"|\1|", block)
+        return "```mermaid\n" + block + "```"
+
+    return re.sub(r"```mermaid\n(.*?)```", _fix_block, blog_content, flags=re.DOTALL)
+
+
 def check_blog(blog_content: str) -> dict:
     """检查博客内容是否符合 technical-blog-writing 规范。
 

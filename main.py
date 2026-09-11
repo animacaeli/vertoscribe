@@ -49,6 +49,7 @@ def run(args) -> str:
     from src.postprocess import (
         check_blog,
         extract_publish_info,
+        fix_mermaid_quotes,
         normalize_blog,
         save_blog,
     )
@@ -248,6 +249,8 @@ def run(args) -> str:
             print(f"  ⚠️  文风重写失败（{exc}），保留初稿", file=sys.stderr)
 
     # ====== 步骤 后处理检查（纯音频模式为步骤 6，vision 模式为步骤 7） ======
+    # 掘金发布管线会把引号转义为 HTML 实体导致线上图表挂掉，提前去掉可安全去除的引号
+    blog_content = fix_mermaid_quotes(blog_content)
     step += 1
     print(f"[{step}/{total_steps}] 后处理检查...")
     result = check_blog(blog_content)
