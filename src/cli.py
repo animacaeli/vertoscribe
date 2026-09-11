@@ -41,8 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-m", "--model",
         type=str,
-        default="deepseek-chat",
-        help="LLM 模型名，默认 deepseek-chat",
+        default=None,
+        help="LLM 模型名，默认取环境变量 LLM_MODEL，未设置则 deepseek-chat",
     )
     parser.add_argument(
         "--provider",
@@ -66,12 +66,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-tokens",
         type=int,
         default=8192,
-        help="DeepSeek 输出最大 token，默认 8192",
+        help="LLM 输出最大 token，默认 8192",
     )
     parser.add_argument(
         "--with-vision",
         action="store_true",
         help="开启画面关键帧分析（需 DashScope API）",
+    )
+    parser.add_argument(
+        "--no-rewrite",
+        action="store_true",
+        help="跳过文风重写 pass（默认开启：初稿生成后额外做一次去 AI 味重写）",
     )
     parser.add_argument(
         "--vision-model",
@@ -141,6 +146,14 @@ def load_dotenv(path: str | None = None):
         pass
 
 
+def resolve_model(args) -> None:
+    """就地解析最终模型名：-m 参数 > 环境变量 LLM_MODEL > deepseek-chat。
+
+    须在 load_dotenv() 之后调用（.env 中的 LLM_MODEL 才会生效）。
+    """
+    args.model = args.model or os.getenv("LLM_MODEL", "").strip() or "deepseek-chat"
+
+
 def init_config():
     """交互式创建用户级配置文件 ~/.config/vertoscribe/.env。"""
     config_dir = os.path.join(os.path.expanduser("~"), ".config", "vertoscribe")
@@ -190,9 +203,13 @@ def preflight_check(args: argparse.Namespace) -> list[str]:
     if shutil.which("ffprobe") is None:
         warnings.append("⚠️ ffprobe 未检测到，将跳过输入文件校验")
 
-    # 3. yt-dlp 可用性（仅 URL 模式）
-    if args.url and shutil.which("yt-dlp") is None:
-        sys.exit("❌ URL 模式需要 yt-dlp。请安装: pip install yt-dlp")
+    # 3. yt-dlp 可用性（仅 B站 URL 需要；抖音走内置解析，无需 yt-dlp）
+    if (
+        args.url
+        and "douyin.com" not in args.url.lower()
+        and shutil.which("yt-dlp") is None
+    ):
+        sys.exit("❌ B站视频下载需要 yt-dlp。请安装: pip install yt-dlp")
 
     # 4. API Key
     if not os.getenv("DEEPSEEK_API_KEY"):
@@ -213,6 +230,7 @@ def main():
         return
 
     load_dotenv()
+    resolve_model(args)
     warnings = preflight_check(args)
 
     if args.verbose:
@@ -220,7 +238,7 @@ def main():
         print("ffmpeg ✅", end=" | ")
         if shutil.which("ffprobe"):
             print("ffprobe ✅", end=" | ")
-        if args.url:
+        if args.url and shutil.which("yt-dlp"):
             print("yt-dlp ✅", end=" | ")
         if os.getenv("DEEPSEEK_API_KEY"):
             print("DEEPSEEK_API_KEY ✅", end="")
@@ -231,9 +249,16 @@ def main():
     for w in warnings:
         print(w, file=sys.stderr)
 
-    # TODO: Phase 1 - 串联全流程
-    print(f"URL: {args.url}, File: {args.file}, Output: {args.output}")
-    print(f"Model: {args.model}, WithVision: {args.with_vision}")
+    # 串联完整流水线。run() 位于仓库根 main.py（非包内模块，editable 安装
+    # 不会把它加入 sys.path），按文件路径显式加载
+    import importlib.util
+    from pathlib import Path
+
+    main_path = Path(__file__).resolve().parent.parent / "main.py"
+    spec = importlib.util.spec_from_file_location("vertoscribe_main", main_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.run(args)
 
 
 if __name__ == "__main__":

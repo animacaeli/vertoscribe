@@ -21,7 +21,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from src.cli import build_parser, load_dotenv, preflight_check
+from src.cli import build_parser, load_dotenv, preflight_check, resolve_model
 
 
 def run(args) -> str:
@@ -46,8 +46,8 @@ def run(args) -> str:
     # 延迟导入 src 子模块，避免未安装依赖时模块级 import 失败
     from src.audio import extract_audio, validate_video
     from src.downloader import VideoDownloadError, download_video, get_video_title
-    from src.postprocess import check_blog, save_blog
-    from src.synthesizer import synthesize
+    from src.postprocess import check_blog, extract_publish_info, normalize_blog, save_blog
+    from src.synthesizer import rewrite_blog, synthesize
     from src.transcriber import transcribe
 
     # ====== 创建临时工作目录 ======
@@ -195,7 +195,7 @@ def run(args) -> str:
         step += 1  # 纯音频模式：下一步是步骤 5
 
     # ====== 步骤 合成（纯音频模式为步骤 5，vision 模式为步骤 6） ======
-    print(f"[{step}/{total_steps}] 博客合成（DeepSeek）...")
+    print(f"[{step}/{total_steps}] 博客合成（LLM: {args.model}）...")
     blog_content = synthesize(
         transcript=full_text,
         output_dir=args.output,
@@ -208,6 +208,39 @@ def run(args) -> str:
     )
     if args.verbose:
         print(f"  博客长度: {len(blog_content)} 字符")
+
+    # 兜底修正 LLM 常见格式问题（开场白 / frontmatter 被包进代码块）
+    blog_content = normalize_blog(blog_content)
+
+    # 文风重写 pass：技术事实保留，只重写表达，去除模板感与 AI 味
+    if not getattr(args, "no_rewrite", False):
+        try:
+            rewritten = rewrite_blog(
+                blog_content,
+                model=args.model,
+                provider=getattr(args, "provider", "deepseek"),
+                api_base=getattr(args, "api_base", None),
+                temperature=args.temperature,
+                max_tokens=args.max_tokens,
+            )
+            rewritten = normalize_blog(rewritten)
+
+            def _code_blocks(text: str) -> int:
+                return len(re.findall(r"^\s*```", text, re.MULTILINE)) // 2
+
+            # 防御：重写丢失 frontmatter、内容过短或代码块明显缩水则回退初稿
+            if (
+                rewritten.startswith("---")
+                and len(rewritten) > len(blog_content) * 0.5
+                and _code_blocks(rewritten) >= _code_blocks(blog_content) * 0.8
+            ):
+                blog_content = rewritten
+                if args.verbose:
+                    print(f"  重写后长度: {len(blog_content)} 字符")
+            else:
+                print("  ⚠️  重写结果异常（内容/代码块缩水），保留初稿", file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ⚠️  文风重写失败（{exc}），保留初稿", file=sys.stderr)
 
     # ====== 步骤 后处理检查（纯音频模式为步骤 6，vision 模式为步骤 7） ======
     step += 1
@@ -224,8 +257,13 @@ def run(args) -> str:
     step += 1
     print(f"[{step}/{total_steps}] 保存博客...")
 
+    # 清理文件名：去掉话题标签（#xxx）、emoji 及文件系统非法字符
+    clean_title = re.sub(r"#\S+", "", video_title)
+    # \w 在 unicode 模式下已含中文，此处剔除 emoji 等特殊符号
+    clean_title = re.sub(r"[^\w\s.-]", "", clean_title)
+    clean_title = re.sub(r"\s+", " ", clean_title).strip(" -")
     # 清理文件名中的特殊字符: /\:*?"<>| 替换为 -
-    safe_title = re.sub(r'[/\\:*?"<>|]', "-", video_title)
+    safe_title = re.sub(r'[/\\:*?"<>|]', "-", clean_title or "untitled")
     # 去除连续短横线和首尾空白
     safe_title = re.sub(r"-{2,}", "-", safe_title).strip()
     output_filename = f"{safe_title}.md"
@@ -244,6 +282,8 @@ def run(args) -> str:
         "transcript_chars": len(full_text),
         "blog_chars": len(blog_content),
         "vision_enabled": args.with_vision,
+        # 掘金发布表单建议（标题/标签/摘要直接复制使用）
+        "publish": extract_publish_info(blog_content),
     }
     report_path = output_path.replace(".md", "_report.json")
     import json as _json
@@ -281,6 +321,7 @@ if __name__ == "__main__":
     # 解析命令行参数
     parser = build_parser()
     args = parser.parse_args()
+    resolve_model(args)
 
     # 前置检查
     warnings = preflight_check(args)
@@ -290,7 +331,7 @@ if __name__ == "__main__":
         print("ffmpeg ✅", end=" | ")
         if shutil.which("ffprobe"):
             print("ffprobe ✅", end=" | ")
-        if args.url:
+        if args.url and shutil.which("yt-dlp"):
             print("yt-dlp ✅", end=" | ")
         if os.getenv("DEEPSEEK_API_KEY"):
             print("DEEPSEEK_API_KEY ✅", end="")
