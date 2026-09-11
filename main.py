@@ -262,15 +262,19 @@ def run(args) -> str:
     step += 1
     print(f"[{step}/{total_steps}] 保存博客...")
 
-    # 清理文件名：去掉话题标签（#xxx）、emoji 及文件系统非法字符
-    clean_title = re.sub(r"#\S+", "", video_title)
-    # \w 在 unicode 模式下已含中文，此处剔除 emoji 等特殊符号
-    clean_title = re.sub(r"[^\w\s.-]", "", clean_title)
+    # 文件名优先用博客 frontmatter 标题（视频标题可能是整段口述问题，过长），
+    # 并统一清理与截断
+    base_title = (
+        extract_publish_info(blog_content).get("title")
+        or re.sub(r"#\S+", "", video_title)
+    )
+    # \w 在 unicode 模式下已含中文，此处剔除 emoji、话题标签等特殊符号
+    clean_title = re.sub(r"[^\w\s.-]", "", base_title)
     clean_title = re.sub(r"\s+", " ", clean_title).strip(" -")
     # 清理文件名中的特殊字符: /\:*?"<>| 替换为 -
     safe_title = re.sub(r'[/\\:*?"<>|]', "-", clean_title or "untitled")
-    # 去除连续短横线和首尾空白
-    safe_title = re.sub(r"-{2,}", "-", safe_title).strip()
+    # 去除连续短横线、首尾空白，并截断到 50 字符
+    safe_title = re.sub(r"-{2,}", "-", safe_title).strip()[:50].strip(" -")
     output_filename = f"{safe_title}.md"
     output_path = os.path.join(args.output, output_filename)
 
