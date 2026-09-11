@@ -26,26 +26,40 @@ def normalize_blog(blog_content: str) -> str:
     return (frontmatter + "\n\n" + text[match.end():].lstrip("\n")).rstrip() + "\n"
 
 
+# 掘金（旧版 mermaid + 发布转义）标签字符映射：全角→半角或空格
+_MERMAID_CHAR_MAP = str.maketrans({
+    "，": " ", "、": " ", "。": " ", "；": " ", "：": ":",
+    "（": " ", "）": " ", "·": " ", "－": "-", "—": "-", "…": "...",
+    "“": "'", "”": "'", "‘": "'", "’": "'", "→": "-",
+    # & 可被旧版解析，但发布时会被转义为 &amp;；@ 旧版解析失败
+    "&": " ", "@": " ",
+})
+
+
 def fix_mermaid_quotes(blog_content: str) -> str:
-    """掘金发布安全的 mermaid 清洗：去除可安全去除的引号 + 消除 <br/>。
+    """掘金发布安全的 mermaid 清洗。
 
-    根因：掘金发布管线会把代码块内的 HTML 特殊字符转义（`"` → `&#34;`、
-    `<br/>` → `&lt;br/&gt;`），线上渲染器不解码，导致发布后图表挂掉
-    （编辑态预览正常）。因此标签必须：无引号、无换行标记，一律单行。
+    两层坑（编辑态预览均正常，发布后挂掉）：
+    1. 掘金发布管线把代码块内的 HTML 特殊字符转义（`"` → `&#34;、
+       `<br/>` → `&lt;br/&gt;`、`&` → `&amp;`），线上渲染器不解码
+    2. 掘金的旧版 mermaid 解析器不支持无引号标签中的全角标点
+       （、，。：（）？ 等实测全部失败，mermaid.ink 等新版能解析——不可信）
 
-    仅当标签不含引号敏感字符（[]{}|"#）时去引号，其余保留引号；
-    `<br/>` 统一替换为空格（标签变单行）。
+    因此标签必须：无引号、单行、仅含 中文/字母/数字/空格 及少量半角符号。
     """
-    # 标签内容字符集：不含 [ ] { } | " # 才能安全去引号
     safe = r'([^"\[\]\{\}\|#]+)'
 
     def _fix_block(match: re.Match) -> str:
         block = match.group(1)
-        # 掘金发布会把 < > 转义，<br/> 换行标记必须消除
+        # 换行标记与引号
         block = re.sub(r"<br\s*/?>", " ", block)
         block = re.sub(r'\["' + safe + r'"\]', r"[\1]", block)
         block = re.sub(r'\{"' + safe + r'"\}', r"{\1}", block)
         block = re.sub(r'\|"' + safe + r'"\|', r"|\1|", block)
+        # 全角标点等旧版解析器不认的字符
+        block = block.translate(_MERMAID_CHAR_MAP)
+        # 连续空格收敛
+        block = re.sub(r"[ \t]{2,}", " ", block)
         return "```mermaid\n" + block + "```"
 
     return re.sub(r"```mermaid\n(.*?)```", _fix_block, blog_content, flags=re.DOTALL)
@@ -171,6 +185,16 @@ def check_blog(blog_content: str) -> dict:
             # HTML 实体（源码层面引入或上游转义残留）
             if re.search(r"&#?\w+;", block):
                 compat_issues.append("含 HTML 实体（如 &#34;），应使用无引号单行标签")
+            # 标签字符白名单：全角标点等旧版解析器不认、&/@ 发布后挂
+            labels = (
+                re.findall(r"\[([^\]]*)\]", block)
+                + re.findall(r"\{([^}]*)\}", block)
+                + re.findall(r"\|([^|]*)\|", block)
+            )
+            whitelist = re.compile(r"[\u4e00-\u9fffA-Za-z0-9?!%+=\-_'*./: ]*")
+            bad_chars = {ch for label in labels for ch in label if not whitelist.fullmatch(ch)}
+            if bad_chars:
+                compat_issues.append(f"标签含不兼容字符: {''.join(sorted(bad_chars))}")
         if compat_issues:
             warnings.append("mermaid 含掘金不兼容语法: " + "；".join(set(compat_issues)))
             score -= 1
