@@ -214,7 +214,15 @@ def check_blog(blog_content: str) -> dict:
 
     # 9. 互动引导：文末（完整度评估之前的正文尾部）应有开放性问句
     #    问号不必在行尾（问题后可接自答引导），扫文末尾部 500 字即可
-    body_end = blog_content.split("## 内容完整度评估")[0].rstrip()
+    #    结尾说明段的小节标题 LLM 命名不稳定（内容完整度评估 / 与原视频说法的差异说明），都剥掉
+    body_end = re.split(
+        r"\n(?:#+\s*|\*\*)\s*(?:内容完整度评估|与原视频说法的差异说明)",
+        blog_content,
+    )[0].rstrip()
+    # 说明段也可能没有小节标题，只以 --- 分隔线 + 有序列表出现
+    parts = body_end.rsplit("\n---\n", 1)
+    if len(parts) == 2 and re.match(r"\s*\d+\.", parts[1]):
+        body_end = parts[0].rstrip()
     if not re.search(r"[?？]", body_end[-500:]):
         warnings.append("文末缺少开放性互动问题（引导评论）")
         score -= 1
