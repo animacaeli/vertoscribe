@@ -21,6 +21,15 @@ _USER_AGENT = (
     "Chrome/130.0.0.0 Safari/537.36"
 )
 
+# 2026-09 起 www.douyin.com Web API（a_bogus 签名）对游客请求返回
+# 403 "Blocked by ArgusSecurityPlugin"，改走移动端分享页 SSR 数据：
+# Android Chrome UA + ttwid 时页面内嵌 _ROUTER_DATA.videoInfoRes。
+_MOBILE_UA = (
+    "Mozilla/5.0 (Linux; Android 13; Pixel 7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/130.0.0.0 Mobile Safari/537.36"
+)
+
 # 与抖音 Web 端一致的基础请求参数
 _BASE_PARAMS = {
     "device_platform": "webapp",
@@ -137,8 +146,49 @@ def get_video_id(share_url: str) -> str:
     raise DouyinDownloadError("无法从链接中解析出视频 ID，链接可能已失效")
 
 
+def _fetch_item_from_share_page(video_id: str) -> dict:
+    """从移动端分享页 SSR 数据中提取 item（无需签名）。
+
+    返回结构与 aweme detail API 的 aweme_detail 兼容（desc / images / video），
+    找不到时抛 DouyinDownloadError。
+    """
+    import json
+
+    url = f"https://m.douyin.com/share/video/{video_id}/"
+    try:
+        resp = requests.get(
+            url,
+            headers={"User-Agent": _MOBILE_UA, "Cookie": f"ttwid={_get_ttwid()}"},
+            timeout=15,
+        )
+    except requests.RequestException as exc:
+        raise DouyinDownloadError(f"访问抖音分享页失败: {exc}") from exc
+
+    if resp.status_code != 200:
+        raise DouyinDownloadError(f"抖音分享页返回 HTTP {resp.status_code}")
+
+    match = re.search(r"_ROUTER_DATA\s*=\s*(\{.*?\})\s*</script>", resp.text, re.DOTALL)
+    if not match:
+        raise DouyinDownloadError("抖音分享页数据缺失，视频可能已被删除或设为私密")
+    try:
+        loader = json.loads(match.group(1))["loaderData"]
+        page = loader[next(k for k in loader if k.endswith("/page"))]
+        item_list = (page.get("videoInfoRes") or {}).get("item_list") or []
+    except (ValueError, KeyError, IndexError, StopIteration):
+        raise DouyinDownloadError("抖音分享页数据解析失败，视频可能已被删除或设为私密")
+
+    if not item_list:
+        raise DouyinDownloadError("抖音视频详情获取失败，视频可能已被删除或设为私密")
+    return item_list[0]
+
+
 def fetch_aweme_detail(share_url: str) -> dict:
-    """调用 aweme detail API，返回 aweme_detail 字典。"""
+    """获取视频详情字典（优先分享页 SSR，失败时回退签名 Web API）。"""
+    try:
+        return _fetch_item_from_share_page(get_video_id(share_url))
+    except DouyinDownloadError:
+        pass
+
     video_id = get_video_id(share_url)
     params = _BASE_PARAMS | {"aweme_id": video_id}
     api_url = "https://www.douyin.com/aweme/v1/web/aweme/detail/"
@@ -227,7 +277,10 @@ def download_video(share_url: str, output_dir: str) -> str:
 
     resp = requests.get(
         info["video_url"],
-        headers={"User-Agent": _USER_AGENT, "Referer": "https://www.douyin.com/"},
+        headers={
+            "User-Agent": _MOBILE_UA,
+            "Referer": "https://www.douyin.com/",
+        },
         stream=True,
         timeout=60,
     )
