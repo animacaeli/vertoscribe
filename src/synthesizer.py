@@ -203,7 +203,25 @@ def _call_with_retry(
         if not response.choices:
             raise RuntimeError("DeepSeek API 返回了空的 choices 列表")
 
-        return response.choices[0].message.content or ""
+        choice = response.choices[0]
+        content = choice.message.content or ""
+        # 截断的输出会被静默保存成半篇文章（曾出现结尾断句、缺 accuracy_score），
+        # 必须当作失败重试而不是原样返回
+        if choice.finish_reason == "length":
+            last_error = RuntimeError(
+                f"输出被 max_tokens={max_tokens} 截断（finish_reason=length）"
+            )
+            if attempt < max_retries:
+                wait = 2 ** attempt
+                print(f"  输出被截断 (第 {attempt + 1}/{max_retries + 1} 次)，{wait}s 后重试...")
+                time.sleep(wait)
+                continue
+            raise RuntimeError(
+                f"LLM 输出持续被截断（已重试 {max_retries} 次），"
+                f"请调大 max_tokens 或精简提示词"
+            ) from last_error
+
+        return content
 
     raise RuntimeError(f"DeepSeek API 调用失败（已重试 {max_retries} 次）: {last_error}") from last_error
 
