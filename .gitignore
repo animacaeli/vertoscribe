@@ -15,3 +15,4 @@ vertoscribe.egg-info/
 .DS_Store
 .idea
 .idea/
+.venv/
