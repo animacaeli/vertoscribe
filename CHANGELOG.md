@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.0] - 2026-10-06
+
+### Added
+- 掘金推荐流优化（目标提高进首页推荐的比例）：
+  - 标题 CTR 导向：合成时生成 `title_candidates`（数字盘点/疑问悬念/痛点复盘三模式各一条，推荐的放首位），报告 `publish.title_candidates` 供 48h 数据差时换标题
+  - 标题新检查：数字/问号/痛点词至少命中两类、长度 ≥12 字
+  - 站外链接新检查：正文外链（掘金降权因素）告警，提示词同步禁止外链
+  - 标题自动提升：模型自选 title 未过 CTR 检查而某候选通过时，保存前确定性换成通过的候选
+  - 报告 `publish` 扩展：`category`（按 tags 推断掘金发布分类）、`publish_window`（发布窗口建议）、`ops_checklist`（冷启动运营清单）；控制台同步输出发布窗口与备选标题
+
+### Fixed
+- LLM 合成/重写默认 `max_tokens` 8192 → 16384：长文初稿加 `title_candidates` 后在 8192 上持续截断（finish_reason=length 重试耗尽直接失败），实测 deepseek-flash 接受 16384
+
 ## [1.1.0] - 2026-09-11
 
 ### Added

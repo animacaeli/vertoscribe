@@ -51,6 +51,7 @@ def run(args) -> str:
         extract_publish_info,
         fix_mermaid_quotes,
         normalize_blog,
+        promote_ctr_title,
         save_blog,
     )
     from src.synthesizer import rewrite_blog, synthesize
@@ -249,6 +250,8 @@ def run(args) -> str:
             print(f"  ⚠️  文风重写失败（{exc}），保留初稿", file=sys.stderr)
 
     # ====== 步骤 后处理检查（纯音频模式为步骤 6，vision 模式为步骤 7） ======
+    # 模型自选标题弱于其候选时，确定性地换成第一条通过 CTR 检查的候选
+    blog_content = promote_ctr_title(blog_content)
     # 掘金发布管线会把引号转义为 HTML 实体导致线上图表挂掉，提前去掉可安全去除的引号
     blog_content = fix_mermaid_quotes(blog_content)
     step += 1
@@ -303,6 +306,13 @@ def run(args) -> str:
         _json.dump(report, _f, ensure_ascii=False, indent=2)
     if args.verbose:
         print(f"  📊 评估报告: {report_path}")
+
+    # ====== 掘金推荐流运营提示（详细版在 _report.json 的 publish 字段） ======
+    publish_info = report["publish"]
+    print(f"  💡 建议发布窗口: {publish_info['publish_window']['首选']}")
+    alt_titles = [t for t in publish_info.get("title_candidates", [])[1:] if t]
+    if alt_titles:
+        print(f"  🎯 备选标题（48h 数据差时可换）: {' / '.join(alt_titles)}")
 
     # ====== 准确率对比（vision 模式时输出） ======
     if vision_was_run:

@@ -83,7 +83,7 @@ def synthesize(
     provider: str = "deepseek",
     api_base: str | None = None,
     temperature: float = 0.7,
-    max_tokens: int = 8192,
+    max_tokens: int = 16384,
 ) -> str:
     """调用 LLM API，将转录文本合成为技术博客 Markdown。
 
@@ -95,7 +95,7 @@ def synthesize(
         provider: API 提供商（deepseek/openai/ollama/qwen），默认 deepseek。
         api_base: 自定义 API base URL，优先级高于 provider。
         temperature: 生成温度，默认 0.7。
-        max_tokens: 最大输出 token 数，默认 8192。
+        max_tokens: 最大输出 token 数，默认 16384（长文初稿 8192 会截断）。
 
     Returns:
         生成的博客 Markdown 字符串。
@@ -141,7 +141,7 @@ def rewrite_blog(
     provider: str = "deepseek",
     api_base: str | None = None,
     temperature: float = 0.7,
-    max_tokens: int = 8192,
+    max_tokens: int = 16384,
 ) -> str:
     """调用 LLM 对初稿做"去 AI 味"重写（prompts/blog_rewrite.md）。
 
