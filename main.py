@@ -23,6 +23,160 @@ from pathlib import Path
 
 from src.cli import build_parser, load_dotenv, preflight_check, resolve_model
 
+# 完整度门槛：最终文章 accuracy_score 低于此值触发定向补全 pass（最多补 N 次）
+MIN_ACCURACY_SCORE = 9.0
+MAX_ENRICH_ATTEMPTS = 2
+
+
+def _count_code_blocks(text: str) -> int:
+    """统计 Markdown 中的代码块数量（按围栏开栏数除以 2）。"""
+    return len(re.findall(r"^\s*```", text, re.MULTILINE)) // 2
+
+
+def _enrich_to_target(blog_content: str, args) -> tuple[str, float | None]:
+    """完整度门槛：accuracy_score < 9 时定向补全，最多 MAX_ENRICH_ATTEMPTS 次。
+
+    run() 主流程与 run_enrich() 存量补全共用。返回 (最终内容, 最终分数)；
+    补全失败或结果缩水时返回补全前版本，由调用方决定是否告警。
+    """
+    from src.postprocess import normalize_blog
+    from src.synthesizer import enrich_blog, extract_accuracy_score
+
+    score = extract_accuracy_score(blog_content)
+    if score is None:
+        print(
+            "  ⚠️  未提取到 accuracy_score，完整度门槛未生效（模型未输出评估段）",
+            file=sys.stderr,
+        )
+        return blog_content, None
+
+    for attempt in range(1, MAX_ENRICH_ATTEMPTS + 1):
+        if score >= MIN_ACCURACY_SCORE:
+            return blog_content, score
+        print(
+            f"  🧩 完整度 {score:g}/10 < {MIN_ACCURACY_SCORE:g}，"
+            f"定向补全 (第 {attempt}/{MAX_ENRICH_ATTEMPTS} 次)..."
+        )
+        try:
+            enriched = normalize_blog(
+                enrich_blog(
+                    blog_content,
+                    model=args.model,
+                    provider=args.provider,
+                    api_base=args.api_base,
+                    temperature=args.temperature,
+                    max_tokens=args.max_tokens,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ⚠️  完整度补全失败（{exc}），保留补全前版本", file=sys.stderr)
+            return blog_content, score
+        # 防御：补全只许加料不许缩水
+        if (
+            enriched.startswith("---")
+            and len(enriched) > len(blog_content) * 0.7
+            and _count_code_blocks(enriched) >= _count_code_blocks(blog_content) * 0.8
+        ):
+            blog_content = enriched
+            score = extract_accuracy_score(blog_content)
+        else:
+            print("  ⚠️  补全结果异常（内容/代码块缩水），保留补全前版本", file=sys.stderr)
+            return blog_content, score
+    return blog_content, score
+
+
+def run_enrich(args) -> list[str]:
+    """enrich 子命令：把已有博客 .md 的内容完整度补全到 9+，就地升级。
+
+    存量文章 retrofit 入口（新文章由 run() 内的完整度门槛自动处理）：
+    读取 → 定向补全（仅当 accuracy_score < 9）→ 标题提升 → mermaid 清洗
+    → 规范检查 → 就地保存（默认备份原稿为 .bak.md）→ 更新同目录报告。
+
+    Args:
+        args: argparse.Namespace，files 为待补全 .md 路径列表。
+
+    Returns:
+        处理成功的文件路径列表。
+    """
+    from src.postprocess import (
+        check_blog,
+        extract_publish_info,
+        fix_mermaid_quotes,
+        normalize_blog,
+        promote_ctr_title,
+        save_blog,
+    )
+    from src.synthesizer import extract_accuracy_score
+
+    processed: list[str] = []
+    for path_str in args.files:
+        path = Path(path_str)
+        if not path.is_file():
+            print(f"❌ 文件不存在，跳过: {path}", file=sys.stderr)
+            continue
+
+        original = path.read_text(encoding="utf-8")
+        blog_content = normalize_blog(original)
+        score_before = extract_accuracy_score(blog_content)
+        print(f"\n📄 {path.name}: 完整度 {score_before if score_before is not None else '未知'}/10")
+
+        blog_content, score = _enrich_to_target(blog_content, args)
+
+        blog_content = promote_ctr_title(blog_content)
+        blog_content = fix_mermaid_quotes(blog_content)
+        result = check_blog(blog_content)
+        print(f"  写作规范评分: {result['score']}/10")
+        for w in result["warnings"]:
+            print(f"  ⚠️  {w}")
+
+        if blog_content == original:
+            print("  无需修改 ✅")
+            processed.append(str(path))
+            continue
+
+        # 备份原稿；.bak.md 已存在时保留最早的原稿（重复 enrich 不覆盖）
+        backup = path.with_suffix(".bak.md")
+        backup_kept = False
+        if not getattr(args, "no_backup", False):
+            if backup.exists():
+                backup_kept = True
+            else:
+                backup.write_text(original, encoding="utf-8")
+        save_blog(blog_content, str(path))
+        backup_note = (
+            "（原稿备份已存在，保留最早版本）"
+            if backup_kept
+            else (f"（原稿备份 {backup.name}）" if not getattr(args, "no_backup", False) else "")
+        )
+        print(
+            f"  完整度 {score_before if score_before is not None else '未知'} → "
+            f"{score if score is not None else '未知'}，已就地更新{backup_note}"
+        )
+
+        # 就近更新评估报告（保留 video_title 等既有字段）
+        import json as _json
+
+        report_path = str(path).removesuffix(".md") + "_report.json"
+        report: dict = {}
+        if os.path.isfile(report_path):
+            with open(report_path, encoding="utf-8") as _f:
+                report = _json.load(_f)
+        report.update(
+            {
+                "output_file": os.path.abspath(path),
+                "model": args.model,
+                "quality_score": result["score"],
+                "warnings": result["warnings"],
+                "accuracy_score": score,
+                "publish": extract_publish_info(blog_content),
+            }
+        )
+        with open(report_path, "w", encoding="utf-8") as _f:
+            _json.dump(report, _f, ensure_ascii=False, indent=2)
+        processed.append(str(path))
+
+    return processed
+
 
 def run(args) -> str:
     """主流程编排，返回最终博客文件路径。
@@ -232,14 +386,11 @@ def run(args) -> str:
             )
             rewritten = normalize_blog(rewritten)
 
-            def _code_blocks(text: str) -> int:
-                return len(re.findall(r"^\s*```", text, re.MULTILINE)) // 2
-
             # 防御：重写丢失 frontmatter、内容过短或代码块明显缩水则回退初稿
             if (
                 rewritten.startswith("---")
                 and len(rewritten) > len(blog_content) * 0.5
-                and _code_blocks(rewritten) >= _code_blocks(blog_content) * 0.8
+                and _count_code_blocks(rewritten) >= _count_code_blocks(blog_content) * 0.8
             ):
                 blog_content = rewritten
                 if args.verbose:
@@ -248,6 +399,15 @@ def run(args) -> str:
                 print("  ⚠️  重写结果异常（内容/代码块缩水），保留初稿", file=sys.stderr)
         except Exception as exc:  # noqa: BLE001
             print(f"  ⚠️  文风重写失败（{exc}），保留初稿", file=sys.stderr)
+
+    # 完整度门槛：accuracy_score < 9 时做定向补全 pass
+    # （视频素材不完整不是借口——缺口用共识知识补齐，文章必须独立完整）
+    blog_content, score = _enrich_to_target(blog_content, args)
+    if score is not None and score < MIN_ACCURACY_SCORE:
+        print(
+            f"  ⚠️  补全后完整度仍为 {score:g}/10，建议人工审查补充",
+            file=sys.stderr,
+        )
 
     # ====== 步骤 后处理检查（纯音频模式为步骤 6，vision 模式为步骤 7） ======
     # 模型自选标题弱于其候选时，确定性地换成第一条通过 CTR 检查的候选
@@ -294,6 +454,7 @@ def run(args) -> str:
         "model": args.model,
         "quality_score": result["score"],
         "warnings": result["warnings"],
+        "accuracy_score": score,
         "transcript_chars": len(full_text),
         "blog_chars": len(blog_content),
         "vision_enabled": args.with_vision,
@@ -317,16 +478,11 @@ def run(args) -> str:
     # ====== 准确率对比（vision 模式时输出） ======
     if vision_was_run:
         print()
-        print("🎯 纯音频准确率预估: ~7-8/10")
-        match = re.search(
-            r"(?:accuracy_score|准确度[评分]).*?[:：]\s*(\d+(?:\.\d+)?)",
-            blog_content,
-            re.IGNORECASE,
-        )
-        if match:
-            print(f"🖼️ 含画面分析准确率: {match.group(1)}/10")
+        if score is not None:
+            print(f"🖼️ 含画面分析的完整度: {score:g}/10")
         else:
-            print("🖼️ 含画面分析准确率: 未从博客中提取到 accuracy_score")
+            print("🖼️ 含画面分析完整度: 未从博客中提取到 accuracy_score")
+        print("（完整度 = 文章作为独立技术文章的完整程度，缺口已尽量用共识知识补全）")
 
     # ====== 清理临时文件（主动清理 + 取消 atexit 注册避免重复） ======
     if not args.keep_temp:

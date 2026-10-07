@@ -159,6 +159,61 @@ class TestJuejinRecommend:
         content = "---\ntitle: 索引失效的 7 种排查路径\n---\n\n正文。\n"
         assert promote_ctr_title(content) == content
 
+    def test_promote_overlong_title_swaps_in_fitting_candidate(self):
+        from src.postprocess import promote_ctr_title
+
+        long_title = "这是一个特别特别特别长的标题" * 4  # 48 字，超过 40 上限
+        content = (
+            "---\n"
+            f"title: {long_title}\n"
+            "title_candidates:\n"
+            f"  - {long_title}\n"
+            "  - 索引建好了 MySQL 却不走，为什么？\n"
+            "---\n\n正文。\n"
+        )
+        promoted = promote_ctr_title(content)
+        assert "title: 索引建好了 MySQL 却不走，为什么？" in promoted
+
+    def test_enrich_subcommand_parses(self):
+        from src.cli import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(["enrich", "a.md", "b.md", "--no-backup"])
+        assert args.command == "enrich"
+        assert args.files == ["a.md", "b.md"]
+        assert args.no_backup is True
+
+
+class TestAccuracyScore:
+    """完整度评分解析与定向补全入口。"""
+
+    def test_extract_int(self):
+        from src.synthesizer import extract_accuracy_score
+
+        assert extract_accuracy_score("accuracy_score: 9") == 9.0
+
+    def test_extract_colon_with_denominator(self):
+        from src.synthesizer import extract_accuracy_score
+
+        assert extract_accuracy_score("准确度评分：8.5/10（有缺口）") == 8.5
+
+    def test_extract_missing(self):
+        from src.synthesizer import extract_accuracy_score
+
+        assert extract_accuracy_score("没有任何评分内容。") is None
+
+    def test_enrich_blog_importable(self):
+        from src.synthesizer import enrich_blog
+
+        assert callable(enrich_blog)
+
+    def test_enrichment_prompt_exists(self):
+        from pathlib import Path
+
+        prompt = Path(__file__).parent.parent / "prompts" / "blog_enrichment.md"
+        assert prompt.exists()
+        assert "$draft" in prompt.read_text(encoding="utf-8")
+
 
 class TestLoadDotenv:
     def test_missing_file(self):

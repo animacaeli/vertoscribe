@@ -134,6 +134,38 @@ def synthesize(
     return content
 
 
+def _transform_pass(
+    draft: str,
+    prompt_file: str,
+    *,
+    user_content: str,
+    label: str,
+    model: str,
+    provider: str,
+    api_base: str | None,
+    temperature: float,
+    max_tokens: int,
+) -> str:
+    """加载 prompts/ 下的转换模板（重写/补全）并执行一次 LLM pass。"""
+    prompt_path = _PROJECT_ROOT / "prompts" / prompt_file
+    with open(prompt_path, "r", encoding="utf-8") as f:
+        template = string.Template(f.read())
+
+    filled = template.safe_substitute(draft=_escape_dollar(draft))
+    client, _ = _resolve_client(provider, api_base)
+
+    content = _call_with_retry(
+        client,
+        model=model,
+        system_content=filled,
+        user_content=user_content,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    _print_accuracy_score(content, label=label)
+    return content
+
+
 def rewrite_blog(
     draft: str,
     *,
@@ -147,24 +179,18 @@ def rewrite_blog(
 
     技术事实、代码、图表保留，只重写表达。失败时抛 RuntimeError。
     """
-    prompt_path = _PROJECT_ROOT / "prompts" / "blog_rewrite.md"
-    with open(prompt_path, "r", encoding="utf-8") as f:
-        template = string.Template(f.read())
-
-    filled = template.safe_substitute(draft=_escape_dollar(draft))
-    client, _ = _resolve_client(provider, api_base)
-
     print("  ✍️  文风重写 pass...")
-    content = _call_with_retry(
-        client,
-        model=model,
-        system_content=filled,
+    return _transform_pass(
+        draft,
+        "blog_rewrite.md",
         user_content="请按重写原则输出重写后的完整博客。",
+        label="重写稿",
+        model=model,
+        provider=provider,
+        api_base=api_base,
         temperature=temperature,
         max_tokens=max_tokens,
     )
-    _print_accuracy_score(content, label="重写稿")
-    return content
 
 
 def _call_with_retry(
@@ -226,14 +252,48 @@ def _call_with_retry(
     raise RuntimeError(f"DeepSeek API 调用失败（已重试 {max_retries} 次）: {last_error}") from last_error
 
 
-def _print_accuracy_score(content: str, label: str = "初稿") -> None:
-    """从博客内容中提取并打印 accuracy_score。"""
+def enrich_blog(
+    draft: str,
+    *,
+    model: str = "deepseek-chat",
+    provider: str = "deepseek",
+    api_base: str | None = None,
+    temperature: float = 0.7,
+    max_tokens: int = 16384,
+) -> str:
+    """调用 LLM 做定向补全 pass（prompts/blog_enrichment.md）。
+
+    完整度评分低于门槛时使用：只补评估段列出的缺口，其余内容不动。
+    失败时抛 RuntimeError。
+    """
+    print("  🧩 完整度补全 pass...")
+    return _transform_pass(
+        draft,
+        "blog_enrichment.md",
+        user_content="请按补全规则输出补全后的完整博客。",
+        label="补全稿",
+        model=model,
+        provider=provider,
+        api_base=api_base,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+
+
+def extract_accuracy_score(content: str) -> float | None:
+    """从博客内容中提取 accuracy_score，无则返回 None。"""
     match = re.search(
         r"(?:accuracy_score|准确度[评分]).*?[:：]\s*(\d+(?:\.\d+)?)",
         content,
         re.IGNORECASE,
     )
-    if match:
-        print(f"[synthesizer] {label} accuracy_score = {match.group(1)}")
+    return float(match.group(1)) if match else None
+
+
+def _print_accuracy_score(content: str, label: str = "初稿") -> None:
+    """从博客内容中提取并打印 accuracy_score。"""
+    score = extract_accuracy_score(content)
+    if score is not None:
+        print(f"[synthesizer] {label} accuracy_score = {score:g}")
     else:
         print(f"[synthesizer] 未从{label}中提取到 accuracy_score")

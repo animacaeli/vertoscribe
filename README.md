@@ -27,6 +27,9 @@ vertoscribe -u "https://v.douyin.com/xxxxxxx/" -o ./output/
 # 从本地 mp4 生成
 vertoscribe -f ./tutorial.mp4 -o ./output/
 
+# 把已有文章的内容完整度补全到 9+（存量 retrofit，素材不完整时用共识知识补齐）
+vertoscribe enrich ./output/某篇文章.md
+
 # 开启画面分析
 vertoscribe -f ./tutorial.mp4 -o ./output/ --with-vision
 ```
@@ -42,8 +45,9 @@ vertoscribe -f ./tutorial.mp4 -o ./output/ --with-vision
 - 🖼️ 可选画面关键帧分析（Qwen-VL），图片内容入文
 - ✅ 写作规范自动检查（摘要/收尾/禁用词/代码块标注/frontmatter/mermaid 兼容/段落节奏/互动引导/标题 CTR/外链，共 11 项）
 - 📝 内置 8 种技术博客类型模板（教程/深度解析/架构设计/基准对比/工具评测/问答体/踩坑复盘/方案对比）
+- 🧩 内容完整度门槛：视频是素材不是边界，素材不完整时用共识知识（官方文档级机制/边界/陷阱）补全；accuracy_score <9 自动触发定向补全 pass（最多 2 次），评分语义 = 读者不看视频能否完整理解落地
 - 💾 转录缓存：SHA256 哈希，避免重复转录
-- 💰 成本透明：纯音频两次 LLM 调用（合成+重写）约 ¥0.02/篇，含画面约 ¥0.17/篇（`--no-rewrite` 可减半）
+- 💰 成本透明：纯音频两次 LLM 调用（合成+重写）约 ¥0.02/篇，完整度补全触发时增加 1-2 次；含画面约 ¥0.17/篇（`--no-rewrite` 可减半）
 - 🧹 临时文件自动清理，支持 `--keep-temp` 调试模式接口
 
 ## 安装

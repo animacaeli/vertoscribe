@@ -78,14 +78,19 @@ def _title_ctr_ok(title: str) -> bool:
     return sum(hits) >= 2
 
 
+def _title_ok(title: str) -> bool:
+    """标题合规判定：CTR 要素（数字/问号/痛点词至少两类）且长度 12-40 字。"""
+    return _title_ctr_ok(title) and 12 <= len(title) <= 40
+
+
 def promote_ctr_title(blog_content: str) -> str:
-    """title 未过 CTR 检查、而某条候选标题通过时，换成第一条通过的候选。
+    """title 不达标（CTR 要素缺失或长度越界）而某条候选达标时，换成第一条达标的候选。
 
     模型偶尔自选的 title 弱于它自己生成的候选（check_blog 第 10 项会告警），
     此处做确定性提升，避免整篇因标题丢分。候选列表保持原样作为后备。
     """
     title_m = re.search(r"^title:\s*[\"']?(.*?)[\"']?\s*$", blog_content, re.MULTILINE)
-    if not title_m or _title_ctr_ok(title_m.group(1)):
+    if not title_m or _title_ok(title_m.group(1)):
         return blog_content
     cand_block_m = re.search(
         r"^title_candidates:\n((?:[ \t]+-.*\n?)+)", blog_content, re.MULTILINE
@@ -95,9 +100,7 @@ def promote_ctr_title(blog_content: str) -> str:
         if cand_block_m
         else []
     )
-    promoted = next(
-        (c for c in candidates if 12 <= len(c) <= 40 and _title_ctr_ok(c)), None
-    )
+    promoted = next((c for c in candidates if _title_ok(c)), None)
     if promoted:
         return re.sub(
             r"^title:.*$",

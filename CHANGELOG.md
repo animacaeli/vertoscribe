@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.3.0] - 2026-10-07
+
+### Added
+- 内容完整度门槛（视频是素材不是边界）：合成/重写提示词改为"独立完整技术文章"定位，素材缺口用共识知识（官方文档级机制/边界/陷阱/版本差异）补全，禁止虚构数字与引用；accuracy_score 语义重定义为独立文章完整度，文末评估段输出"已补充的共识内容/仍存缺口"两份清单
+- 定向补全 pass：最终 accuracy_score <9 时自动触发（`prompts/blog_enrichment.md`，最多 2 次，带内容/代码块缩水防御），补全后仍不达标则告警提示人工审查
+- `synthesizer.extract_accuracy_score()` 公开解析函数；vision 模式对比输出改为完整度口径
+- `vertoscribe enrich <file.md>...` 子命令：存量文章补全到 9+，就地升级（默认备份 `.bak.md`，`--no-backup` 关闭），同步更新同目录 `_report.json`；标题提升扩展为长度越界（>40/<12）也触发换用合规候选
+
+### Changed
+- CLI `--max-tokens` 默认值 8192 → 16384（与库默认对齐，长文不再截断）
+- 主流程 `_report.json` 补记 `accuracy_score`（门槛结果落盘可追溯）；模型未输出评估段时告警而非静默跳过补全
+- `enrich` 重复运行不再覆盖最早的 `.bak.md` 原稿备份
+- 代码审查重构：抽取 `_enrich_to_target`（主流程与 enrich 子命令共用补全循环）与 `_transform_pass`（重写/补全共用 LLM 调用结构），净减约 60 行重复代码
+
 ## [1.2.0] - 2026-10-06
 
 ### Added

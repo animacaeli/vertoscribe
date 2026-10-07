@@ -19,6 +19,20 @@ def build_parser() -> argparse.ArgumentParser:
     # config 子命令
     subparsers = parser.add_subparsers(dest="command", help="子命令")
     subparsers.add_parser("config", help="交互式配置 API 密钥（保存到 ~/.config/vertoscribe/.env）")
+    enrich_parser = subparsers.add_parser(
+        "enrich",
+        help="把已有博客 .md 的内容完整度补全到 9+（视频素材不完整时用共识知识补齐）",
+    )
+    enrich_parser.add_argument(
+        "files",
+        nargs="+",
+        help="待补全的博客 .md 文件路径（支持多个）",
+    )
+    enrich_parser.add_argument(
+        "--no-backup",
+        action="store_true",
+        help="不保留原稿备份（默认写 <文件名>.bak.md）",
+    )
 
     source = parser.add_mutually_exclusive_group()
     source.add_argument(
@@ -65,8 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=8192,
-        help="LLM 输出最大 token，默认 8192",
+        default=16384,
+        help="LLM 输出最大 token，默认 16384",
     )
     parser.add_argument(
         "--with-vision",
@@ -220,6 +234,18 @@ def preflight_check(args: argparse.Namespace) -> list[str]:
     return warnings
 
 
+def _load_main_module():
+    """按文件路径加载仓库根 main.py（非包内模块，editable 安装不会加入 sys.path）。"""
+    import importlib.util
+    from pathlib import Path
+
+    main_path = Path(__file__).resolve().parent.parent / "main.py"
+    spec = importlib.util.spec_from_file_location("vertoscribe_main", main_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def main():
     parser = build_parser()
     args = parser.parse_args()
@@ -227,6 +253,15 @@ def main():
     # 子命令：交互式配置
     if getattr(args, "command", None) == "config":
         init_config()
+        return
+
+    # 子命令：存量文章完整度补全（无需 ffmpeg，只需 LLM API）
+    if getattr(args, "command", None) == "enrich":
+        load_dotenv()
+        resolve_model(args)
+        if not os.getenv("DEEPSEEK_API_KEY"):
+            print("⚠️ DEEPSEEK_API_KEY 未设置，补全步骤将失败", file=sys.stderr)
+        _load_main_module().run_enrich(args)
         return
 
     load_dotenv()
@@ -249,16 +284,8 @@ def main():
     for w in warnings:
         print(w, file=sys.stderr)
 
-    # 串联完整流水线。run() 位于仓库根 main.py（非包内模块，editable 安装
-    # 不会把它加入 sys.path），按文件路径显式加载
-    import importlib.util
-    from pathlib import Path
-
-    main_path = Path(__file__).resolve().parent.parent / "main.py"
-    spec = importlib.util.spec_from_file_location("vertoscribe_main", main_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    module.run(args)
+    # 串联完整流水线。run() 位于仓库根 main.py
+    _load_main_module().run(args)
 
 
 if __name__ == "__main__":
